@@ -25,4 +25,4 @@ jobs:
     - name: Run Bandit
       run: |
         # Run Bandit on your codebase
-        bandit -r.
+        bandit -r .
