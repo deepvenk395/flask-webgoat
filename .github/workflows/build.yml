@@ -1,28 +1,85 @@
-name: Security Scan
+name: Code Scan, SBOM, and Dependency Scan
 
 on:
-  push:
-    branches:
-      - master
+  pull_request:
+    types: [opened, closed]
 
 jobs:
-  security_scan:
+  code-scan:
     runs-on: ubuntu-latest
 
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v2
+      - name: Checkout code
+        uses: actions/checkout@v3
 
-    - name: Set up Python
-      uses: actions/setup-python@v2
-      with:
-        python-version: '3.x'  # Choose the desired Python version
+      - name: Setup Python
+        uses: actions/setup-python@v2
+        with:
+          python-version: '3.x'
 
-    - name: Install Bandit
-      run: |
-        python -m pip install bandit
+      - name: Install dependencies
+        run: |
+          pip install bandit # Install Bandit or gosec
+          # Install any other necessary dependencies for SBOM and Dependency Scanning
 
-    - name: Run Bandit
-      run: |
-        # Run Bandit on your codebase
-        bandit -r .
+      - name: Run code scan
+        run: bandit -r .
+
+      - name: Check for critical vulnerabilities
+        run: |
+          if grep -q "CRITICAL" bandit-output.txt; then
+            echo "::set-output name=block_pr::true"
+          else
+            echo "::set-output name=block_pr::false"
+          fi
+
+      - name: Comment on PR and Merge
+        if: steps.check_vulnerabilities.outputs.block_pr == 'true'
+        run: echo "Block" # Comment 'Block' on PR if critical vulnerabilities found
+      else
+        run: echo "Successful" # Comment 'Successful' on PR if no critical vulnerabilities found
+
+  sbom-and-dependency-scan:
+    needs: code-scan
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v2
+
+      - name: Set up Java
+        uses: actions/setup-java@v2
+        with:
+          java-version: '11'
+
+      - name: Generate CycloneDX SBOM
+        run: |
+          # Install CycloneDX CLI
+          curl -sL https://github.com/CycloneDX/cyclonedx-cli/releases/latest/download/install.sh | sh
+          # Generate CycloneDX SBOM
+          cyclonedx-cli -o bom.xml
+          
+      - name: Dependency Scanning
+        uses: github/codeql-action/analyze@v2
+        with:
+          languages: java
+          query: security-and-quality.ql
+
+      - name: Report Findings
+        if: ${{ github.event.pull_request.merged == true }}
+        run: |
+          # Install CycloneDX CLI
+          curl -sL https://github.com/CycloneDX/cyclonedx-cli/releases/latest/download/install.sh | sh
+          # Scan SBOM for vulnerabilities
+          cyclonedx-cli bom analyze --input-file bom.xml
+          # Output the findings to a file
+          cyclonedx-cli bom report --input-file bom.xml --format json --output-file findings.json
+          # Read the findings and post a comment on the PR
+          findings=$(cat findings.json)
+          echo "Vulnerability Findings: $findings"
+          # Post a comment on the PR
+          curl -X POST \
+            -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+            -H "Accept: application/vnd.github.v3+json" \
+            https://api.github.com/repos/${{ github.repository }}/issues/${{ github.event.pull_request.number }}/comments \
+            -d "{\"body\":\"Vulnerability Findings: $findings\"}"
