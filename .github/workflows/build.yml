@@ -37,8 +37,8 @@ jobs:
       - name: Comment on PR and Merge
         if: steps.check_vulnerabilities.outputs.block_pr == 'true'
         run: echo "Block" # Comment 'Block' on PR if critical vulnerabilities found
-      else:
-        run: echo "Successful" # Comment 'Successful' on PR if no critical vulnerabilities found
+        else:
+          run: echo "Successful" # Comment 'Successful' on PR if no critical vulnerabilities found
 
   sbom-and-dependency-scan:
     needs: code-scan
